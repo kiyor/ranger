@@ -59,10 +59,18 @@ local origin_headers = {}
 local origin_info = file_dict:get(ngx.var.uri .. "-info")
 if not origin_info then
 	file_dict:set(ngx.var.uri .. "-update", true, 5)
+        local matches, err = match(ngx.var.uri, "^/purge(/.*)")
+        local url = backend .. ngx.var.uri
+        if matches then
+                url = backend .. matches[1]
+        end
 	local ok, code, headers, status, body = httpc:request { 
-		url = backend .. ngx.var.uri, 
+		url = url, 
 		method = 'HEAD' 
 	}
+        if code > 299 then
+                ngx.exit(code)
+        end
 	for key, value in pairs(bypass_headers) do
 		origin_headers[value] = headers[key]
 	end
@@ -74,7 +82,10 @@ end
 origin_headers = cjson.decode(origin_info)
 
 -- parse range header
-local range_header = ngx.req.get_headers()["Range"] or "bytes=0-"
+local range_header = ngx.req.get_headers()["Range"]
+if not range_header then
+        ngx.status = 200
+end
 local matches, err = match(range_header, "^bytes=(\\d+)?-([^\\\\]\\d+)?", "joi")
 if matches then
 	if matches[1] == nil and matches[2] then
@@ -85,6 +96,7 @@ if matches then
 		stop = matches[2] or (origin_headers["Content-Length"] - 1)
 	end
 else
+	start = 0
 	stop = (origin_headers["Content-Length"] - 1)
 end
 
@@ -94,7 +106,9 @@ end
 
 local cl = origin_headers["Content-Length"]
 ngx.header["Content-Length"] = (stop - (start - 1))
-ngx.header["Content-Range"] = "bytes " .. start .. "-" .. stop .. "/" .. cl
+if range_header then
+        ngx.header["Content-Range"] = "bytes " .. start .. "-" .. stop .. "/" .. cl
+end
 
 block_stop = (ceil(stop / block_size) * block_size)
 block_start = (floor(start / block_size) * block_size)
@@ -179,12 +193,14 @@ for block_range_start = block_start, stop, block_size do
 		ngx.print(sub(body, (content_start + 1), content_stop)) -- lua count from 1
 	end
 
-	if ngx.re.match(headers["x-cache"],"HIT") then
-		chunk_map:set(block_id)
-		cache_dict:incr("cache_hit", 1)
-	else
-		chunk_map:clear(block_id)
-		cache_dict:incr("cache_miss", 1)
+        if headers["x-cache"] then
+		if ngx.re.match(headers["x-cache"],"HIT") then
+			chunk_map:set(block_id)
+			cache_dict:incr("cache_hit", 1)
+		else
+			chunk_map:clear(block_id)
+			cache_dict:incr("cache_miss", 1)
+		end
 	end
 end
 chunk_dict:set(ngx.var.uri,cjson.encode(chunk_map.nums))
