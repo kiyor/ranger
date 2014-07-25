@@ -22,9 +22,10 @@ local bypass_headers = {
 
 local httpc = http.new()
 
-local cache_dict = ngx.shared.cache_dict
-local file_dict = ngx.shared.file_dict 
-local chunk_dict = ngx.shared.chunk_dict
+local zone_id = ngx.var.zone_id
+local cache_dict = ngx.shared["cache_dict" .. "_" .. zone_id]
+local file_dict = ngx.shared["file_dict" .. "_" .. zone_id] 
+local chunk_dict = ngx.shared["chunk_dict" .. "_" .. zone_id]
 
 local sub = string.sub
 local tonumber = tonumber
@@ -48,22 +49,26 @@ if not ok then
 	ngx.exit(500)
 end
 
+local uri = ngx.var.uri
+local is_purge = false
+local matches, err = match(ngx.var.uri, "^/purge(/.*)")
+if matches then
+	uri = matches[1]
+	is_purge = true
+end
+
 -- try reading values from dict, if not issue a HEAD request and save the value
-local updating, flags = file_dict:get(ngx.var.uri .. "-update")
+local updating, flags = file_dict:get(uri .. "-update")
 repeat 
-	updating, flags = file_dict:get(ngx.var.uri .. "-update")
+	updating, flags = file_dict:get(uri .. "-update")
 	ngx.sleep(0.1)
 until not updating 
 
 local origin_headers = {}
-local origin_info = file_dict:get(ngx.var.uri .. "-info")
+local origin_info = file_dict:get(uri .. "-info")
 if not origin_info then
-	file_dict:set(ngx.var.uri .. "-update", true, 5)
-        local matches, err = match(ngx.var.uri, "^/purge(/.*)")
-        local url = backend .. ngx.var.uri
-        if matches then
-                url = backend .. matches[1]
-        end
+        local url = backend .. uri
+	file_dict:set(uri .. "-update", true, 5)
 	local ok, code, headers, status, body = httpc:request { 
 		url = url, 
 		method = 'HEAD' 
@@ -75,27 +80,30 @@ if not origin_info then
 		origin_headers[value] = headers[key]
 	end
 	origin_info = cjson.encode(origin_headers)
-	file_dict:set(ngx.var.uri .. "-info", origin_info, fcttl)
-	file_dict:delete(ngx.var.uri .. "-update")
+	file_dict:set(uri .. "-info", origin_info, fcttl)
+	file_dict:delete(uri .. "-update")
 end
 
 origin_headers = cjson.decode(origin_info)
 
 -- parse range header
 local range_header = ngx.req.get_headers()["Range"]
-if not range_header then
-        ngx.status = 200
-end
-local matches, err = match(range_header, "^bytes=(\\d+)?-([^\\\\]\\d+)?", "joi")
-if matches then
-	if matches[1] == nil and matches[2] then
-		stop = (origin_headers["Content-Length"] - 1)
-		start = (stop - matches[2]) + 1
+if range_header then
+	local matches, err = match(range_header, "^bytes=(\\d+)?-([^\\\\]\\d+)?", "joi")
+	if matches then
+		if matches[1] == nil and matches[2] then
+			stop = (origin_headers["Content-Length"] - 1)
+			start = (stop - matches[2]) + 1
+		else
+			start = matches[1] or 0
+			stop = matches[2] or (origin_headers["Content-Length"] - 1)
+		end
 	else
-		start = matches[1] or 0
-		stop = matches[2] or (origin_headers["Content-Length"] - 1)
+		start = 0
+		stop = (origin_headers["Content-Length"] - 1)
 	end
 else
+	ngx.status = 200
 	start = 0
 	stop = (origin_headers["Content-Length"] - 1)
 end
@@ -114,7 +122,7 @@ block_stop = (ceil(stop / block_size) * block_size)
 block_start = (floor(start / block_size) * block_size)
 
 -- hits / miss info
-local chunk_info, flags = chunk_dict:get(ngx.var.uri)
+local chunk_info, flags = chunk_dict:get(uri)
 local chunk_map = bslib:new()
 if chunk_info then
 	chunk_map.nums = cjson.decode(chunk_info)
@@ -202,7 +210,10 @@ for block_range_start = block_start, stop, block_size do
 			cache_dict:incr("cache_miss", 1)
 		end
 	end
+        if is_purge then
+                chunk_map:clear(block_id)
+        end
 end
-chunk_dict:set(ngx.var.uri,cjson.encode(chunk_map.nums))
+chunk_dict:set(uri,cjson.encode(chunk_map.nums))
 ngx.eof()
 return ngx.exit(206)
