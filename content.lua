@@ -49,9 +49,9 @@ if not ok then
 	ngx.exit(500)
 end
 
-local uri = ngx.var.uri
+local uri = ngx.var.request_uri
 local is_purge = false
-local matches, err = match(ngx.var.uri, "^/purge(/.*)")
+local matches, err = match(ngx.var.request_uri, "^/purge(/.*)")
 if matches then
 	uri = matches[1]
 	is_purge = true
@@ -74,7 +74,7 @@ if not origin_info then
 		method = 'HEAD' 
 	}
         if code > 299 then
-                ngx.exit(code)
+                return ngx.exit(code)
         end
 	for key, value in pairs(bypass_headers) do
 		origin_headers[value] = headers[key]
@@ -173,7 +173,7 @@ for block_range_start = block_start, stop, block_size do
 	local content_stop = -1
 
 	local req_params = {
-		url = backend .. ngx.var.uri,
+		url = backend .. ngx.var.request_uri,
 		method = 'GET',
 		headers = {
 			Range = "bytes=" .. block_range_start .. "-" .. block_range_stop,
@@ -216,4 +216,4 @@ for block_range_start = block_start, stop, block_size do
 end
 chunk_dict:set(uri,cjson.encode(chunk_map.nums))
 ngx.eof()
-return ngx.exit(206)
+return ngx.exit(ngx.status)
