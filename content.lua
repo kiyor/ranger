@@ -50,6 +50,7 @@ if not ok then
 end
 
 local uri = ngx.var.request_uri
+local host = ngx.var.host
 local is_purge = false
 local matches, err = match(ngx.var.request_uri, "^/purge(/.*)")
 if matches then
@@ -70,7 +71,8 @@ if not origin_info then
         local url = backend .. uri
 	file_dict:set(uri .. "-update", true, 5)
 	local ok, code, headers, status, body = httpc:request { 
-		url = url, 
+		url = url,
+                headers = {Host = host},
 		method = 'HEAD' 
 	}
         if code > 299 then
@@ -177,6 +179,7 @@ for block_range_start = block_start, stop, block_size do
 		method = 'GET',
 		headers = {
 			Range = "bytes=" .. block_range_start .. "-" .. block_range_stop,
+			Host = host
 		}
 	}
 
