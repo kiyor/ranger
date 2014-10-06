@@ -4,9 +4,17 @@ local cjson = require("cjson")
 local bslib = require("bitset") -- https://github.com/bsm/bitset.lua
 
 -- basic configuration
-local block_size = 256*1024 -- Block size 256k
+local block_size = 10 * 1024 * 1024
+if ngx.var.block_size then
+	block_size = ngx.var.block_size -- Block size 256k
+end
 local backend = "http://127.0.0.1:8080/" -- backend
-local fcttl = 30 -- Time to cache HEAD requests
+local headbackend = "http://" .. ngx.var.origin .. "/"
+local headhost = ngx.var.origin
+local fcttl = 24 * 60 * 60 -- Time to cache HEAD requests
+if ngx.var.fcttl then
+	fcttl = ngx.var.fcttl
+end
 
 local bypass_headers = { 
 	["expires"] = "Expires",
@@ -68,11 +76,11 @@ until not updating
 local origin_headers = {}
 local origin_info = file_dict:get(uri .. "-info")
 if not origin_info then
-        local url = backend .. uri
+        local url = headbackend .. uri
 	file_dict:set(uri .. "-update", true, 5)
 	local ok, code, headers, status, body = httpc:request { 
 		url = url,
-                headers = {Host = host},
+                headers = {Host = headhost},
 		method = 'HEAD' 
 	}
         if code > 299 then
