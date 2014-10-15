@@ -32,6 +32,7 @@ local bypass_headers = {
 local httpchead = http.new()
 httpchead:connect(headhost, 80)
 local httpc = http.new()
+httpc:set_keepalive(3000, 10)
 httpc:connect("127.0.0.1",8080)
 
 local zone_id = ngx.var.zone_id
@@ -233,6 +234,18 @@ for block_range_start = block_start, stop, block_size do
                         Host = host
                 }
         }
+
+--	reconnect if connection closed
+	if err == 'closed' then
+		httpc:connect("127.0.0.1",8080)
+		res, err = httpc:request{
+                	path = ngx.var.request_uri,
+                	headers = {
+                        	Range = "bytes=" .. block_range_start .. "-" .. block_range_stop,
+                	        Host = host
+         	       }
+        	}
+	end
 
         local reader = res.body_reader
 
