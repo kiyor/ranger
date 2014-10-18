@@ -267,7 +267,7 @@ for block_range_start = block_start, stop, block_size do
 			if chunk_content_read >= content_stop then
 				chunk_content_stop = content_stop - (chunk_content_read - string.len(chunk))
 			else
-				chunk_content_stop = block_size
+				chunk_content_stop = -1
 			end
 			if chunk_content_read <= content_start or (chunk_content_read >= content_stop + chunk_size and content_stop ~= -1) then
 --				do nothing
@@ -289,6 +289,7 @@ for block_range_start = block_start, stop, block_size do
 --	if body then
 --		ngx.print(sub(body, (content_start + 1), content_stop)) -- lua count from 1
 --	end
+	httpc:close()
         if headers["X-Cache"] then
 		if ngx.re.match(headers["X-Cache"],"HIT") then
 			chunk_map:set(block_id)
