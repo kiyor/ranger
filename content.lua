@@ -58,7 +58,7 @@ local ok, err = ngx.on_abort(function ()
 	ngx.exit(499)
 end)
 if not ok then
-	ngx.err(ngx.LOG, "Can't register on_abort function.")
+	ngx.log(ngx.ERR, "Can't register on_abort function.")
 	ngx.exit(500)
 end
 
@@ -259,22 +259,24 @@ for block_range_start = block_start, stop, block_size do
 
                 if chunk then
 			chunk_content_read = chunk_content_read + string.len(chunk)
+--			default is to serve the entire chunk
+			local chunk_content_start = 1
+			local chunk_content_stop = -1
+--			if we only serve part of the block to the end user then we need to set chunk start and stop
 			if content_start > 0 and chunk_content_read > content_start and chunk_content_read <= content_start + chunk_size then
 				chunk_content_start = content_start + 1 - (chunk_content_read - string.len(chunk))
-			else
-				chunk_content_start = 1
 			end
 			if chunk_content_read >= content_stop then
 				chunk_content_stop = content_stop - (chunk_content_read - string.len(chunk))
-			else
-				chunk_content_stop = -1
 			end
 			if chunk_content_read <= content_start or (chunk_content_read >= content_stop + chunk_size and content_stop ~= -1) then
---				do nothing
-			elseif chunk_content_start == 0 and chunk_content_stop == -1 then
+--				chunk we read is outside of the range we need to serve then we do nothing
+			elseif chunk_content_start == 1 and chunk_content_stop == -1 then
+--				entire chunk is needed so just print
 				ngx.print(chunk)
 				ngx.flush(true)
 			else 
+--				part of the chunk is needed
 				ngx.print(sub(chunk, chunk_content_start, chunk_content_stop))
 				ngx.flush(true)
 			end
@@ -290,6 +292,7 @@ for block_range_start = block_start, stop, block_size do
 --		ngx.print(sub(body, (content_start + 1), content_stop)) -- lua count from 1
 --	end
 	httpc:close()
+	httpchead:close()
         if headers["X-Cache"] then
 		if ngx.re.match(headers["X-Cache"],"HIT") then
 			chunk_map:set(block_id)
