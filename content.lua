@@ -89,11 +89,18 @@ if not origin_info then
 --              headers = {Host = headhost},
 --		method = 'HEAD' 
 --	}
-	local res, err = httpchead:request{
+        local head_req_params = {
 		path = uri,
 		method = 'HEAD',
 		headers = {Host = headhost}
-	}
+        }
+	local origin_request_headers = ngx.req.get_headers()
+	for k, v in pairs(origin_request_headers) do
+		if (k ~= 'host' and k ~= 'user-agent' and k~= 'accept') then
+			head_req_params['headers'][k] = v
+		end
+	end
+	local res, err = httpchead:request(head_req_params)
 	if not ok then
 		ngx.log(ngx.EMERG, "Error performing HEAD request ", status, " ", code, " on url ", url)
 		return ngx.exit(500)
@@ -259,10 +266,8 @@ for block_range_start = block_start, stop, block_size do
 
                 if chunk then
 			chunk_content_read = chunk_content_read + string.len(chunk)
---			default is to serve the entire chunk
 			local chunk_content_start = 1
 			local chunk_content_stop = -1
---			if we only serve part of the block to the end user then we need to set chunk start and stop
 			if content_start > 0 and chunk_content_read > content_start and chunk_content_read <= content_start + chunk_size then
 				chunk_content_start = content_start + 1 - (chunk_content_read - string.len(chunk))
 			end
@@ -270,13 +275,11 @@ for block_range_start = block_start, stop, block_size do
 				chunk_content_stop = content_stop - (chunk_content_read - string.len(chunk))
 			end
 			if chunk_content_read <= content_start or (chunk_content_read >= content_stop + chunk_size and content_stop ~= -1) then
---				chunk we read is outside of the range we need to serve then we do nothing
+--				do nothing
 			elseif chunk_content_start == 1 and chunk_content_stop == -1 then
---				entire chunk is needed so just print
 				ngx.print(chunk)
 				ngx.flush(true)
 			else 
---				part of the chunk is needed
 				ngx.print(sub(chunk, chunk_content_start, chunk_content_stop))
 				ngx.flush(true)
 			end
