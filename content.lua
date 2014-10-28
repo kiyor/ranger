@@ -96,7 +96,7 @@ if not origin_info then
         }
 	local origin_request_headers = ngx.req.get_headers()
 	for k, v in pairs(origin_request_headers) do
-		if (k ~= 'host' and k ~= 'user-agent' and k~= 'accept') then
+		if (k ~= 'host' and k ~= 'user-agent' and k ~= 'accept' and k ~= 'range') then
 			head_req_params['headers'][k] = v
 		end
 	end
