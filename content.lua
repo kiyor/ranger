@@ -5,30 +5,35 @@ local bslib = require("bitset") -- https://github.com/bsm/bitset.lua
 
 -- basic configuration
 local block_size = 10 * 1024 * 1024
-if ngx.var.block_size then
-	block_size = ngx.var.block_size -- Block size 256k
+local chunk_size =  8192
+if ngx.var.block_size and ngx.var.block_size ~= "" then
+	block_size = tonumber(ngx.var.block_size) -- Block size 256k
 end
 local backend = "http://127.0.0.1:8080/" -- backend
-local headbackend = "http://" .. ngx.var.origin .. "/"
+local headbackend = "http://" .. ngx.var.origin 
 local headhost = ngx.var.origin
 local fcttl = 24 * 60 * 60 -- Time to cache HEAD requests
-if ngx.var.fcttl then
-	fcttl = ngx.var.fcttl
+if ngx.var.fcttl and ngx.var.fcttl ~= "" then
+	fcttl = tonumber(ngx.var.fcttl)
 end
 
 local bypass_headers = { 
-	["expires"] = "Expires",
-	["content-type"] = "Content-Type",
-	["last-modified"] = "Last-Modified",
-	["expires"] = "Expires",
-	["cache-control"] = "Cache-Control",
-	["server"] = "Server",
-	["content-length"] = "Content-Length",
+	["Expires"] = "Expires",
+	["Content-Type"] = "Content-Type",
+	["Last-Modified"] = "Last-Modified",
+	["Expires"] = "Expires",
+	["Cache-Control"] = "Cache-Control",
+	["Server"] = "Server",
+	["Content-Length"] = "Content-Length",
 	["p3p"] = "P3P",
-	["accept-ranges"] = "Accept-Ranges"
+	["Accept-Ranges"] = "Accept-Ranges"
 }
 
+local httpchead = http.new()
+httpchead:connect(headhost, 80)
 local httpc = http.new()
+httpc:set_keepalive(3000, 10)
+httpc:connect("127.0.0.1",8080)
 
 local zone_id = ngx.var.zone_id
 local cache_dict = ngx.shared["cache_dict" .. "_" .. zone_id]
@@ -53,7 +58,7 @@ local ok, err = ngx.on_abort(function ()
 	ngx.exit(499)
 end)
 if not ok then
-	ngx.err(ngx.LOG, "Can't register on_abort function.")
+	ngx.log(ngx.ERR, "Can't register on_abort function.")
 	ngx.exit(500)
 end
 
@@ -78,11 +83,23 @@ local origin_info = file_dict:get(uri .. "-info")
 if not origin_info then
         local url = headbackend .. uri
 	file_dict:set(uri .. "-update", true, 5)
-	local ok, code, headers, status, body = httpc:request { 
-		url = url,
-                headers = {Host = headhost},
-		method = 'HEAD' 
+	ngx.log(ngx.EMERG, "Going to make HEAD request ", url, ", ", headhost)
+--	local ok, code, headers, status, body = httpc:request { 
+--		url = url,
+--              headers = {Host = headhost},
+--		method = 'HEAD' 
+--	}
+	local res, err = httpchead:request{
+		path = uri,
+		method = 'HEAD',
+		headers = {Host = headhost}
 	}
+	if not ok then
+		ngx.log(ngx.EMERG, "Error performing HEAD request ", status, " ", code, " on url ", url)
+		return ngx.exit(500)
+	end
+	local code = res.status
+	local headers = res.headers
         if code > 299 then
                 return ngx.exit(code)
         end
@@ -130,6 +147,7 @@ end
 
 block_stop = (ceil(stop / block_size) * block_size)
 block_start = (floor(start / block_size) * block_size)
+
 
 -- hits / miss info
 local chunk_info, flags = chunk_dict:get(uri)
@@ -205,15 +223,78 @@ for block_range_start = block_start, stop, block_size do
 	if (block_range_stop + 1) == block_stop then
 		req_params["body_callback"] = nil
 		content_stop = (stop - block_range_start) + 1
+	else
+		content_stop = block_size
 	end
 
-	local ok, code, headers, status, body  = httpc:request(req_params)
-	if body then
-		ngx.print(sub(body, (content_start + 1), content_stop)) -- lua count from 1
+        local res, err = httpc:request{
+                path = ngx.var.request_uri,
+                headers = {
+                        Range = "bytes=" .. block_range_start .. "-" .. block_range_stop,
+                        Host = host
+                }
+        }
+
+--	reconnect if connection closed
+	if err == 'closed' then
+		httpc:connect("127.0.0.1",8080)
+		res, err = httpc:request{
+                	path = ngx.var.request_uri,
+                	headers = {
+                        	Range = "bytes=" .. block_range_start .. "-" .. block_range_stop,
+                	        Host = host
+         	       }
+        	}
 	end
 
-        if headers["x-cache"] then
-		if ngx.re.match(headers["x-cache"],"HIT") then
+        local reader = res.body_reader
+
+	local chunk_content_read = 0
+        repeat
+                local chunk, err = reader(chunk_size)
+                if err then
+                        ngx.log(ngx.ERR, err)
+                        break
+                end
+
+                if chunk then
+			chunk_content_read = chunk_content_read + string.len(chunk)
+--			default is to serve the entire chunk
+			local chunk_content_start = 1
+			local chunk_content_stop = -1
+--			if we only serve part of the block to the end user then we need to set chunk start and stop
+			if content_start > 0 and chunk_content_read > content_start and chunk_content_read <= content_start + chunk_size then
+				chunk_content_start = content_start + 1 - (chunk_content_read - string.len(chunk))
+			end
+			if chunk_content_read >= content_stop then
+				chunk_content_stop = content_stop - (chunk_content_read - string.len(chunk))
+			end
+			if chunk_content_read <= content_start or (chunk_content_read >= content_stop + chunk_size and content_stop ~= -1) then
+--				chunk we read is outside of the range we need to serve then we do nothing
+			elseif chunk_content_start == 1 and chunk_content_stop == -1 then
+--				entire chunk is needed so just print
+				ngx.print(chunk)
+				ngx.flush(true)
+			else 
+--				part of the chunk is needed
+				ngx.print(sub(chunk, chunk_content_start, chunk_content_stop))
+				ngx.flush(true)
+			end
+             	end
+      	until not chunk or chunk_content_read >= content_stop
+
+        local code = res.status
+	local headers = res.headers
+--	local body = res.body
+
+--	local ok, code, headers, status, body  = httpc:request(req_params)
+--	if body then
+--		ngx.print(sub(body, (content_start + 1), content_stop)) -- lua count from 1
+--	end
+	httpc:close()
+	httpchead:close()
+        if headers["X-Cache"] then
+		if ngx.re.match(headers["X-Cache"],"HIT") then
 			chunk_map:set(block_id)
 			cache_dict:incr("cache_hit", 1)
 		else
