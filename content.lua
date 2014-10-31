@@ -123,7 +123,7 @@ origin_headers = cjson.decode(origin_info)
 -- parse range header
 local range_header = ngx.req.get_headers()["Range"]
 if range_header then
-	local matches, err = match(range_header, "^bytes=(\\d+)?-([^\\\\]\\d+)?", "joi")
+	local matches, err = match(range_header, "^bytes=(\\d+)?-(\\d+)?", "joi")
 	if matches then
 		if matches[1] == nil and matches[2] then
 			stop = (origin_headers["Content-Length"] - 1)
