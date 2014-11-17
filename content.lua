@@ -92,7 +92,7 @@ local origin_info = file_dict:get(headuri .. "-info")
 if not origin_info then
         local url = headbackend .. headuri
 	file_dict:set(headuri .. "-update", true, 5)
-	ngx.log(ngx.EMERG, "Going to make HEAD request ", url, ", ", headhost)
+--	ngx.log(ngx.EMERG, "Going to make HEAD request ", url, ", ", headhost)
 --	local ok, code, headers, status, body = httpc:request { 
 --		url = url,
 --              headers = {Host = headhost},
@@ -273,9 +273,9 @@ for block_range_start = block_start, stop, block_size do
         repeat
                 local chunk, err = reader(chunk_size)
                 if err then
-                        ngx.log(ngx.ERR, err)
 --	http 1.0 will close the connection when reading the last chunck, so we still need to print the last chunk instead of exiting
                         if err ~= 'closed' then
+				ngx.log(ngx.ERR, err)
                         	break
 			end
                 end
