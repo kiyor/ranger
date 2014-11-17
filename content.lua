@@ -16,6 +16,10 @@ local fcttl = 24 * 60 * 60 -- Time to cache HEAD requests
 if ngx.var.fcttl and ngx.var.fcttl ~= "" then
 	fcttl = tonumber(ngx.var.fcttl)
 end
+local ignore_querystring = false
+if ngx.var.ignore_querystring and ngx.var.ignore_querystring ~= "" ngx.var.ignore_querystring ~= "0" then
+	ignore_querystring = true
+end
 
 local bypass_headers = { 
 	["Expires"] = "Expires",
@@ -63,26 +67,31 @@ if not ok then
 end
 
 local uri = ngx.var.request_uri
+local headuri = ngx.var.request_uri
+if ignore_querystring then
+	uri = ngx.var.uri
+	headuri = ngx.var.uri
+done
 local host = ngx.var.host
 local is_purge = false
-local matches, err = match(ngx.var.request_uri, "^/purge(/.*)")
+local matches, err = match(headuri, "^/purge(/.*)")
 if matches then
-	uri = matches[1]
+	headuri = matches[1]
 	is_purge = true
 end
 
 -- try reading values from dict, if not issue a HEAD request and save the value
-local updating, flags = file_dict:get(uri .. "-update")
+local updating, flags = file_dict:get(headuri .. "-update")
 repeat 
-	updating, flags = file_dict:get(uri .. "-update")
+	updating, flags = file_dict:get(headuri .. "-update")
 	ngx.sleep(0.1)
 until not updating 
 
 local origin_headers = {}
-local origin_info = file_dict:get(uri .. "-info")
+local origin_info = file_dict:get(headuri .. "-info")
 if not origin_info then
-        local url = headbackend .. uri
-	file_dict:set(uri .. "-update", true, 5)
+        local url = headbackend .. headuri
+	file_dict:set(headuri .. "-update", true, 5)
 	ngx.log(ngx.EMERG, "Going to make HEAD request ", url, ", ", headhost)
 --	local ok, code, headers, status, body = httpc:request { 
 --		url = url,
@@ -90,7 +99,7 @@ if not origin_info then
 --		method = 'HEAD' 
 --	}
         local head_req_params = {
-		path = uri,
+		path = headuri,
 		method = 'HEAD',
 		headers = {Host = headhost}
         }
@@ -114,8 +123,8 @@ if not origin_info then
 		origin_headers[value] = headers[key]
 	end
 	origin_info = cjson.encode(origin_headers)
-	file_dict:set(uri .. "-info", origin_info, fcttl)
-	file_dict:delete(uri .. "-update")
+	file_dict:set(headuri .. "-info", origin_info, fcttl)
+	file_dict:delete(headuri .. "-update")
 end
 
 origin_headers = cjson.decode(origin_info)
@@ -157,7 +166,7 @@ block_start = (floor(start / block_size) * block_size)
 
 
 -- hits / miss info
-local chunk_info, flags = chunk_dict:get(uri)
+local chunk_info, flags = chunk_dict:get(headuri)
 local chunk_map = bslib:new()
 if chunk_info then
 	chunk_map.nums = cjson.decode(chunk_info)
@@ -208,7 +217,7 @@ for block_range_start = block_start, stop, block_size do
 	local content_stop = -1
 
 	local req_params = {
-		url = backend .. ngx.var.request_uri,
+		url = backend .. uri,
 		method = 'GET',
 		headers = {
 			Range = "bytes=" .. block_range_start .. "-" .. block_range_stop,
@@ -234,8 +243,10 @@ for block_range_start = block_start, stop, block_size do
 		content_stop = block_size
 	end
 
+--	set body request http version to 1.0
         local res, err = httpc:request{
-                path = ngx.var.request_uri,
+		version = 1.0,
+                path = uri,
                 headers = {
                         Range = "bytes=" .. block_range_start .. "-" .. block_range_stop,
                         Host = host
@@ -245,8 +256,10 @@ for block_range_start = block_start, stop, block_size do
 --	reconnect if connection closed
 	if err == 'closed' then
 		httpc:connect("127.0.0.1",8080)
+--      set body request http version to 1.0
 		res, err = httpc:request{
-                	path = ngx.var.request_uri,
+			version = 1.0,
+                	path = uri,
                 	headers = {
                         	Range = "bytes=" .. block_range_start .. "-" .. block_range_stop,
                 	        Host = host
@@ -261,7 +274,10 @@ for block_range_start = block_start, stop, block_size do
                 local chunk, err = reader(chunk_size)
                 if err then
                         ngx.log(ngx.ERR, err)
-                        break
+--	http 1.0 will close the connection when reading the last chunck, so we still need to print the last chunk instead of exiting
+                        if err ~= 'closed' then
+                        	break
+			end
                 end
 
                 if chunk then
@@ -309,6 +325,6 @@ for block_range_start = block_start, stop, block_size do
                 chunk_map:clear(block_id)
         end
 end
-chunk_dict:set(uri,cjson.encode(chunk_map.nums))
+chunk_dict:set(headuri,cjson.encode(chunk_map.nums))
 ngx.eof()
 return ngx.exit(ngx.status)
