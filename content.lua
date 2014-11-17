@@ -17,7 +17,7 @@ if ngx.var.fcttl and ngx.var.fcttl ~= "" then
 	fcttl = tonumber(ngx.var.fcttl)
 end
 local ignore_querystring = false
-if ngx.var.ignore_querystring and ngx.var.ignore_querystring ~= "" ngx.var.ignore_querystring ~= "0" then
+if ngx.var.ignore_querystring and ngx.var.ignore_querystring ~= "" and ngx.var.ignore_querystring ~= "0" then
 	ignore_querystring = true
 end
 
