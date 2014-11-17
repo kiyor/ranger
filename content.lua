@@ -71,7 +71,7 @@ local headuri = ngx.var.request_uri
 if ignore_querystring then
 	uri = ngx.var.uri
 	headuri = ngx.var.uri
-done
+end
 local host = ngx.var.host
 local is_purge = false
 local matches, err = match(headuri, "^/purge(/.*)")
