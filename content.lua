@@ -2,6 +2,7 @@
 local http = require("resty.http") -- https://github.com/liseen/lua-resty-http
 local cjson = require("cjson")
 local bslib = require("bitset") -- https://github.com/bsm/bitset.lua
+require("pack")
 
 -- basic configuration
 local block_size = 10 * 1024 * 1024
@@ -80,6 +81,35 @@ if matches then
 	is_purge = true
 end
 
+local is_flv = false
+local matches, err = match(ngx.var.uri, "(\\.flv)$", "joi")
+if matches then
+        is_flv = true
+end
+local is_mp4 = false
+local matches, err = match(ngx.var.uri, "(\\.mp4)$", "joi")
+if matches then
+        is_mp4 = ture
+end
+
+local is_pseudostreaming = false
+local start_byte = 0
+if ngx.var.args then
+	local matches, err = match(ngx.var.args, "start=(\\d+)", "joi")
+	if matches then
+        	is_pseudostreaming = true
+        	start_byte = matches[1]
+		headuri = string.gsub(headuri, "start=%d+&?","")
+		uri = string.gsub(uri, "start=%d+&?","")
+                headuri = string.gsub(headuri, "end=%d+&?","")
+                uri = string.gsub(uri, "end=%d+&?","")
+		headuri = string.gsub(headuri, "%?$","")
+        	uri = string.gsub(uri, "%?$","")
+                headuri = string.gsub(headuri, "&$","")
+                uri = string.gsub(uri, "&$","")
+	end
+end
+
 -- try reading values from dict, if not issue a HEAD request and save the value
 local updating, flags = file_dict:get(headuri .. "-update")
 repeat 
@@ -92,7 +122,6 @@ local origin_info = file_dict:get(headuri .. "-info")
 if not origin_info then
         local url = headbackend .. headuri
 	file_dict:set(headuri .. "-update", true, 5)
---	ngx.log(ngx.EMERG, "Going to make HEAD request ", url, ", ", headhost)
 --	local ok, code, headers, status, body = httpc:request { 
 --		url = url,
 --              headers = {Host = headhost},
@@ -111,7 +140,7 @@ if not origin_info then
 	end
 	local res, err = httpchead:request(head_req_params)
 	if not ok then
-		ngx.log(ngx.EMERG, "Error performing HEAD request ", status, " ", code, " on url ", url)
+--		ngx.log(ngx.EMERG, "Error performing HEAD request ", status, " ", code, " on url ", url)
 		return ngx.exit(500)
 	end
 	local code = res.status
@@ -145,6 +174,10 @@ if range_header then
 		start = 0
 		stop = (origin_headers["Content-Length"] - 1)
 	end
+elseif is_flv and is_pseudostreaming then
+        ngx.status = 200
+        start = start_byte
+	stop = (origin_headers["Content-Length"] - 1)
 else
 	ngx.status = 200
 	start = 0
@@ -234,6 +267,14 @@ for block_range_start = block_start, stop, block_size do
 	if block_range_start == block_start then
 		req_params["body_callback"] = nil
 		content_start = (start - block_range_start)
+                        if is_flv and is_pseudostreaming then
+                                ngx.print("FLV")
+                                ngx.print(string.pack("b",1))
+                                ngx.print(string.pack("b",1))
+                                ngx.print(string.pack(">I",9))
+                                ngx.print(string.pack(">I",9))
+				ngx.flush(true)
+                        end
 	end
 
 	if (block_range_stop + 1) == block_stop then
