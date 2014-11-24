@@ -86,11 +86,6 @@ local matches, err = match(ngx.var.uri, "(\\.flv)$", "joi")
 if matches then
         is_flv = true
 end
-local is_mp4 = false
-local matches, err = match(ngx.var.uri, "(\\.mp4)$", "joi")
-if matches then
-        is_mp4 = ture
-end
 
 local is_pseudostreaming = false
 local start_byte = 0
@@ -140,7 +135,7 @@ if not origin_info then
 	end
 	local res, err = httpchead:request(head_req_params)
 	if not ok then
---		ngx.log(ngx.EMERG, "Error performing HEAD request ", status, " ", code, " on url ", url)
+		ngx.log(ngx.EMERG, "Error performing HEAD request ", status, " ", code, " on url ", url)
 		return ngx.exit(500)
 	end
 	local code = res.status
