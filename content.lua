@@ -69,9 +69,9 @@ end
 
 local uri = ngx.var.request_uri
 local headuri = ngx.var.request_uri
+local cacheuri = ngx.var.request_uri
 if ignore_querystring then
-	uri = ngx.var.uri
-	headuri = ngx.var.uri
+	cacheuri = ngx.var.uri
 end
 local host = ngx.var.host
 local is_purge = false
@@ -79,6 +79,10 @@ local matches, err = match(headuri, "^/purge(/.*)")
 if matches then
 	headuri = matches[1]
 	is_purge = true
+end
+local matches, err = match(cacheuri, "^/purge(/.*)")
+if matches then
+        cacheuri = matches[1]
 end
 
 local is_flv = false
@@ -96,27 +100,31 @@ if ngx.var.args then
         	start_byte = matches[1]
 		headuri = string.gsub(headuri, "start=%d+&?","")
 		uri = string.gsub(uri, "start=%d+&?","")
+		cacheuri = string.gsub(uri, "start=%d+&?","")
                 headuri = string.gsub(headuri, "end=%d+&?","")
                 uri = string.gsub(uri, "end=%d+&?","")
+		cacheuri = string.gsub(uri, "end=%d+&?","")
 		headuri = string.gsub(headuri, "%?$","")
         	uri = string.gsub(uri, "%?$","")
+		cacheuri = string.gsub(uri, "%?$","")
                 headuri = string.gsub(headuri, "&$","")
                 uri = string.gsub(uri, "&$","")
+		cacheuri = string.gsub(uri, "&$","")
 	end
 end
 
 -- try reading values from dict, if not issue a HEAD request and save the value
-local updating, flags = file_dict:get(headuri .. "-update")
+local updating, flags = file_dict:get(cacheuri .. "-update")
 repeat 
-	updating, flags = file_dict:get(headuri .. "-update")
+	updating, flags = file_dict:get(cacheuri .. "-update")
 	ngx.sleep(0.1)
 until not updating 
 
 local origin_headers = {}
-local origin_info = file_dict:get(headuri .. "-info")
+local origin_info = file_dict:get(cacheuri .. "-info")
 if not origin_info then
         local url = headbackend .. headuri
-	file_dict:set(headuri .. "-update", true, 5)
+	file_dict:set(cacheuri .. "-update", true, 5)
 --	local ok, code, headers, status, body = httpc:request { 
 --		url = url,
 --              headers = {Host = headhost},
@@ -147,8 +155,8 @@ if not origin_info then
 		origin_headers[value] = headers[key]
 	end
 	origin_info = cjson.encode(origin_headers)
-	file_dict:set(headuri .. "-info", origin_info, fcttl)
-	file_dict:delete(headuri .. "-update")
+	file_dict:set(cacheuri .. "-info", origin_info, fcttl)
+	file_dict:delete(cacheuri .. "-update")
 end
 
 origin_headers = cjson.decode(origin_info)
@@ -194,7 +202,7 @@ block_start = (floor(start / block_size) * block_size)
 
 
 -- hits / miss info
-local chunk_info, flags = chunk_dict:get(headuri)
+local chunk_info, flags = chunk_dict:get(cacheuri)
 local chunk_map = bslib:new()
 if chunk_info then
 	chunk_map.nums = cjson.decode(chunk_info)
@@ -361,6 +369,6 @@ for block_range_start = block_start, stop, block_size do
                 chunk_map:clear(block_id)
         end
 end
-chunk_dict:set(headuri,cjson.encode(chunk_map.nums))
+chunk_dict:set(cacheuri,cjson.encode(chunk_map.nums))
 ngx.eof()
 return ngx.exit(ngx.status)
