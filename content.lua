@@ -90,10 +90,15 @@ local matches, err = match(ngx.var.uri, "(\\.flv)$", "joi")
 if matches then
         is_flv = true
 end
+local is_mp4 = false
+local matches, err = match(ngx.var.uri, "(\\.mp4)$", "joi")
+if matches then
+        is_mp4 = true
+end
 
 local is_pseudostreaming = false
 local start_byte = 0
-if ngx.var.args then
+if ngx.var.args and (is_flv or is_mp4) then
 	local matches, err = match(ngx.var.args, "start=(\\d+)", "joi")
 	if matches then
         	is_pseudostreaming = true
