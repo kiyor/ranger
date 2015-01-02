@@ -127,6 +127,8 @@ if not origin_info then
 	file_dict:delete(headuri .. "-update")
 end
 
+httpchead:close()
+
 origin_headers = cjson.decode(origin_info)
 
 -- parse range header
@@ -310,8 +312,7 @@ for block_range_start = block_start, stop, block_size do
 --	if body then
 --		ngx.print(sub(body, (content_start + 1), content_stop)) -- lua count from 1
 --	end
-	httpc:close()
-	httpchead:close()
+
         if headers["X-Cache"] then
 		if ngx.re.match(headers["X-Cache"],"HIT") then
 			chunk_map:set(block_id)
@@ -325,6 +326,9 @@ for block_range_start = block_start, stop, block_size do
                 chunk_map:clear(block_id)
         end
 end
+
+httpc:close()
+
 chunk_dict:set(headuri,cjson.encode(chunk_map.nums))
 ngx.eof()
 return ngx.exit(ngx.status)
